@@ -1,0 +1,122 @@
+#!/bin/bash
+if [ $1 ]
+then
+    # Processing script options.
+    for i in "$@"
+    do
+        case $i in
+            -m=*|--mail=*)
+                mail="${i#*=}"
+            ;;
+            -s|--ssl)
+                ssl=1
+            ;;
+            -h|--help)
+                echo "Local virtual host creator"
+                echo "Usage: vhost <server-name>"
+                echo
+                echo "You can use the following options:"
+                echo -e "-m\t--mail\t\tServer administrator Email address (--mail=admin@example.com)"
+                echo -e "-s\t--ssll\t\tGenerate self-signed SSL certificate"
+                echo -e "-v\t--version\tGet script version"
+                exit 0
+            ;;
+            -v|--version)
+                echo "1.0.0"
+                exit 0
+            ;;
+            -*)
+                echo "${i#} is not en option."
+            ;;
+        esac
+    done
+
+    # Setting default server admin mail if does not exist.
+    if [ -z $mail ]
+    then
+        mail="$USER@$HOSTNAME"
+    fi
+
+    # Website folder
+    read -e -p "Please, enter the website path: " -i "/var/www/$1" site_path
+    while [[ $site_path == '' ]] || [[ $site_path == '/' ]]
+    do
+        echo "$(tput setaf 1)Enter a valid website path$(tput sgr 0)"
+        read -p "Please, enter the website path: " site_path
+    done
+
+    # Creation website folder.
+    if [ ! -d "$site_path" ]
+    then
+        sudo mkdir ${site_path}
+    fi
+    sudo chown ${USER}:www-data ${site_path}
+    chmod 775 ${site_path}
+
+    # Creation virtual hos file.
+    sudo bash -c "cat > /etc/apache2/sites-available/$1.conf" << EOF
+# This config was automatically created by VHOST script.
+<VirtualHost *:80>
+    ServerAdmin $mail
+    DocumentRoot $site_path
+    ServerName $1
+    ServerAlias www.$1
+
+    <Directory $site_path>
+        Options Indexes FollowSymLinks MultiViews
+        AllowOverride All
+        Order allow,deny
+        Allow from all
+    </Directory>
+    ErrorLog \${APACHE_LOG_DIR}/error.log
+    CustomLog \${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>
+
+EOF
+    if [ $ssl ]
+    then
+        if [ ! -d "/etc/apache2/ssl/$1" ]
+        then
+            sudo mkdir /etc/apache2/ssl/${1}
+        fi
+        echo
+        echo "Please provide info for SSL Certificate."
+        read -p "Country Name (2 letter code): " ssl_c
+        read -p "State or Province Name (full name): " ssl_st
+        read -p "Locality Name (eg, city): " ssl_l
+        read -p "Organization Name (eg, company): " ssl_o
+        read -p "Organizational Unit Name (eg, section): " ssl_ou
+        # Generation of SSL Certificate.
+        sudo openssl req -newkey rsa:2048 -nodes -keyout /etc/apache2/ssl/${1}/apache.key -x509 -days 365 -out /etc/apache2/ssl/${1}/apache.crt -subj /C=${ssl_c}/ST=${ssl_st}/L=${ssl_l}/O=${ssl_o}/OU=${ssl_ou}/CN=${1}/emailAddress=${mail}/
+        # Adding SSL configurations to virtual host.
+        sudo bash -c "cat >> /etc/apache2/sites-available/$1.conf" << EOF
+<IfModule mod_ssl.c>
+<VirtualHost *:443>
+    ServerAdmin $mail
+    DocumentRoot $site_path
+    ServerName $1
+    <Directory $site_path>
+        Options Indexes FollowSymLinks MultiViews
+        AllowOverride All
+        Order allow,deny
+        Allow from all
+    </Directory>
+    #   SSL Engine Switch:
+    #   Enable/Disable SSL for this virtual host.
+    SSLEngine on
+    SSLCertificateFile /etc/apache2/ssl/$1/apache.crt
+    SSLCertificateKeyFile /etc/apache2/ssl/$1/apache.key
+
+    ErrorLog \${APACHE_LOG_DIR}/error.log
+    CustomLog \${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>
+</IfModule>
+
+EOF
+    fi
+    sudo a2ensite ${1}
+    sudo service apache2 restart
+    sudo bash -c "cat >> /etc/hosts" << EOF
+127.0.0.1$(echo $'\t')$1$(echo $'\t')www.$1
+EOF
+fi
