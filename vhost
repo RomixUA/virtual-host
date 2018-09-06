@@ -22,7 +22,7 @@ then
                 exit 0
             ;;
             -v|--version)
-                echo "1.0.0"
+                echo "1.0.1"
                 exit 0
             ;;
             -*)
@@ -48,7 +48,7 @@ then
     # Creation website folder.
     if [ ! -d "$site_path" ]
     then
-        sudo mkdir ${site_path}
+        sudo mkdir -p ${site_path}
     fi
     sudo chown ${USER}:www-data ${site_path}
     chmod 775 ${site_path}
